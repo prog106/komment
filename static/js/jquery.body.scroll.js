@@ -1,0 +1,10 @@
+$(function(){
+    //get
+    if($.cookie('scroll_loc')){
+        $(window).scrollTop($.cookie('scroll_loc'));
+    }
+    //set
+    $(window).scroll(function(){
+        $.cookie('scroll_loc',$(this).scrollTop());
+    });
+});

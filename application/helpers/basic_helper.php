@@ -1,0 +1,543 @@
+<?php  if ( ! defined('BASEPATH')) exit('No direct script access allowed');
+
+if(!function_exists('ok_result')) {
+    function ok_result($data=array(), $msg='정상처리') { // {{{
+        return array('result' => 'ok', 'msg' => $msg, 'data' => $data);
+    } // }}}
+}
+
+if(!function_exists('error_result')) {
+    function error_result($msg='에러입니다.', $data=array()) { // {{{
+        return array('result' => 'error', 'msg' => $msg, 'data' => $data);
+    } // }}}
+}
+
+if(!function_exists('lang')) {
+    function lang($en, $id=null) { // {{{
+        $mode = 'view';
+        if(empty($en)) return '';
+        $local = (!empty($_COOKIE['languages'])) ? $_COOKIE['languages'] : 'english' ;
+
+        // 영어, 인도네시아어 같이 들어올 경우 번역안타기
+        if(!empty($en) && !empty($id)) {
+            if(!empty($id) && $local == 'indonesian') {
+                return $id;
+            } else {
+                return $en;
+            }
+        }
+
+        if($local === 'translate-e'){
+            $local = 'english';
+            $mode = 'translate';
+        }
+
+        // 가져와서 memcache 로?
+        $CI =& get_instance();
+        $CI->load->driver('cache');
+        $res = $CI->cache->memcached->get('langs');
+        if(empty($res)) {
+            $res = array();
+            $sql = "SELECT * FROM langs";
+            $langs = $CI->load->database('lang', TRUE);
+            $result = $langs->query($sql);
+            $return = $result->result_array();
+            foreach($return as $k => $v) {
+                $res['english'][strtolower($v['korean'])] = $v['english'];
+                $res['indonesian'][strtolower($v['korean'])] = $v['indonesian'];
+            }
+            $CI->cache->memcached->save('langs', $res, 60*30);
+        }
+
+        if(!isset($res[$local]) || !array_key_exists(strtolower($en), $res[$local])) { // 없는 경우
+            // DB에 저장
+            $lang_prm['korean'] = $en;
+            if(ENVIRONMENT !== 'development') {
+                $langs = $CI->load->database('lang', TRUE);
+                $query = $langs->insert_string('langs', $lang_prm);
+                $query = str_replace("INSERT INTO", "INSERT IGNORE INTO", $query);
+                $langs->query($query);
+            }
+            if($mode == 'translate'){
+                return '<code>['.$en.']</code> : ';
+            }
+            else{
+                return $en;
+            }
+        } else {
+            if($mode == 'translate'){
+                return (empty($res[$local][strtolower($en)])) ? '<code>['.$en.']</code> : ' : '<code>['.$en.']</code> : '.$res[$local][strtolower($en)];
+            }
+            else{
+                return (empty($res[$local][strtolower($en)])) ? $en : $res[$local][strtolower($en)];
+            }
+        }
+    } // }}}
+}
+
+// 팝업창이면 팝업 닫고
+// 아니면 URL을 replace 하거나, back();
+if(!function_exists('alertmsg_move')) {
+    function alertmsg_move($msg, $url=''){ // {{{
+        echo "<html>";
+        echo "<head>";
+        echo "<meta http-equiv='Content-Type' content='text/html; charset=utf-8'>";
+        echo "</head>";
+        echo "<body>";
+        echo "<script>";
+        echo "alert('".$msg."');";
+        echo "if(window.opener){";
+        echo "window.close();";
+        echo "}else{";
+        if(empty($url))
+            echo "history.go(-1);";
+        else
+            echo "location.replace('".$url."');";
+        echo "}";
+        echo "</script>";
+        echo "</body>";
+        echo "</html>";
+        exit;
+    } // }}}
+}
+
+// 팝업창이면 팝업 닫고
+// 아니면 URL을 replace 하거나, back();
+if(!function_exists('close_reload')) {
+    function close_reload($url=''){ // {{{
+        echo "<html>";
+        echo "<head>";
+        echo "<meta http-equiv='Content-Type' content='text/html; charset=utf-8'>";
+        echo "</head>";
+        echo "<body>";
+        echo "<script>";
+        if(empty($url)) {
+            echo "opener.location.reload();";
+        } else {
+            echo "opener.location.replace('".$url."');";
+        }
+        echo "window.close();";
+        echo "</script>";
+        echo "</body>";
+        echo "</html>";
+        exit;
+    } // }}}
+}
+
+
+if(!function_exists('add_month')) {
+    function add_month($ymd_his, $i) { // {{{
+        // +i 번째 달의 마지막 날
+        $last_day_of_i_th_month = date("t", strtotime(date("Y-m-01", strtotime($ymd_his))." +".$i." month"));
+        // 오늘 날짜랑 비교해서 오늘날짜가 더 크면... 이달 1일의 다음달의 마지막날로 넣어줌.. 헥헥
+        if(date("d", strtotime($ymd_his)) > $last_day_of_i_th_month){
+            return date("Y-m-t H:i:s", strtotime(date("Y-m-01", strtotime($ymd_his))." +".$i." month"));
+        }else{
+            return date("Y-m-d H:i:s", strtotime($ymd_his." +".$i." month"));
+        }
+    } // }}}
+}
+
+
+// 주문시 필요한 memcache key 생성
+if(!function_exists('generate_order_key')) {
+    function generate_order_key(){ // {{{
+        if(!defined('COMP_SRL')){
+            return FALSE;
+        }
+        else{
+            $order_key = '';
+            $characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
+            $order_key = COMP_SRL.time();
+            for($i=0; $i<5; $i++){
+                $order_key .= $characters[rand(0, strlen($characters) - 1)];
+            }
+
+            return $order_key;
+        }
+    } // }}}
+}
+
+if(!function_exists('file_copy')) {
+    /*
+    * @param $file_list_arr = 
+    *                       array(
+    *                            array('file'=>'업로드된 파일 경로', 'folder'=>'업로드할 uploads 하위 폴더명', 'prefix'=>'파일 앞에 붙일 prefix', 'suffix'=>'파일 뒤에 붙일 suffix'),
+    *                            array('file'=>'업로드된 파일 경로', 'folder'=>'업로드할 uploads 하위 폴더명', 'prefix'=>'파일 앞에 붙일 prefix', 'suffix'=>'파일 뒤에 붙일 suffix'),
+    *                            array('file'=>'업로드된 파일 경로', 'folder'=>'업로드할 uploads 하위 폴더명', 'prefix'=>'파일 앞에 붙일 prefix', 'suffix'=>'파일 뒤에 붙일 suffix'),
+    *                       )
+    * @return $file_list_arr = 
+    *                       array(
+    *                           array('file'=>'업로드된 파일 경로', 'folder'=>'업로드할 uploads 하위 폴더명', 'prefix'=>'파일 앞에 붙일 prefix', 'suffix'=>'파일 뒤에 붙일 suffix', 'ret'=>결과, 'msg'=>결과문구, 'new_file'=>이동된 파일)
+    *                           array('file'=>'업로드된 파일 경로', 'folder'=>'업로드할 uploads 하위 폴더명', 'prefix'=>'파일 앞에 붙일 prefix', 'suffix'=>'파일 뒤에 붙일 suffix', 'ret'=>결과, 'msg'=>결과문구, 'new_file'=>이동된 파일)
+    *                           array('file'=>'업로드된 파일 경로', 'folder'=>'업로드할 uploads 하위 폴더명', 'prefix'=>'파일 앞에 붙일 prefix', 'suffix'=>'파일 뒤에 붙일 suffix', 'ret'=>결과, 'msg'=>결과문구, 'new_file'=>이동된 파일)
+    *                       )
+    *
+    */
+    function file_copy($file_list_arr) { // {{{
+        $upload_root = $_SERVER['DOCUMENT_ROOT'];
+        foreach($file_list_arr as $idx=>$file_row){
+            if(empty($file_row['file'])){
+                $file_row['ret'] = 'nok';
+                $file_row['msg'] = 'no file';
+            }
+            else{
+                $upload_path = '/uploads';
+                $original_file_name = $file_row['file'];
+                $folder_name_arr = array_key_exists('folder_arr', $file_row) ? $file_row['folder_arr'] : '';
+                $file_name_prefix = array_key_exists('prefix', $file_row) ? $file_row['prefix'] : '';
+                $file_name_suffix = array_key_exists('suffix', $file_row) ? $file_row['suffix'] : '';
+                
+                if(!empty($folder_name_arr)){
+                    if(is_array($folder_name_arr)){
+                        foreach($folder_name_arr as $folder_name){
+                            $upload_path .= '/'.$folder_name;
+                            if(!is_dir($upload_root.$upload_path)){
+                                mkdir($upload_root.$upload_path,0777,TRUE);
+                                chmod($upload_root.$upload_path, 0777);
+                            }
+                        }
+                    }
+                    else{
+                        $upload_path .= '/'.$folder_name;
+                        if(!is_dir($upload_root.$upload_path)){
+                            mkdir($upload_root.$upload_path,0777,TRUE);
+                            chmod($upload_root.$upload_path, 0777);
+                        }
+                    }
+                }
+                
+                $original_file_ext = explode('.', $original_file_name);
+                $original_file_ext =  $original_file_ext[count($original_file_ext)-1];
+                $micro_time = round(array_sum(explode(' ', microtime())), 3);
+                $new_file_name = $file_name_prefix.($idx.'_'.str_replace('.', '', $micro_time)).$file_name_suffix.'.'.$original_file_ext;
+
+                if (!copy($upload_root.$original_file_name, $upload_root.$upload_path.'/'.$new_file_name)) { // 파일 카피 실패
+                    $file_row['ret'] = 'nok';
+                    $file_row['msg'] = 'file upload fail';
+                    continue;
+                }
+
+                $file_row['ret'] = 'ok';
+                $file_row['msg'] = 'copy success';
+                $file_row['new_file'] = $upload_path.'/'.$new_file_name;
+            }
+
+            $file_list_arr[$idx] = $file_row;
+
+        }
+
+        return $file_list_arr;
+    } // }}}
+}
+
+// 앞에 prefix 붙여주기
+// purchase => P, product => #
+if(!function_exists('add_prefix')) {
+    function add_prefix($str, $type='product'){ // {{{
+        $prefix = '';
+        if($type === 'purchase') $prefix = 'P';
+        else if($type === 'product') $prefix = '#';
+
+        if($str && $prefix){
+            if(strpos(strtoupper($str), $prefix) !== 0){
+                $str = $prefix.$str;
+            }
+        }
+        return $str;
+    } // }}}
+}
+
+// 앞에 prefix 빼주기
+if(!function_exists('remove_prefix')) {
+    function remove_prefix($str, $type='product'){ // {{{
+        $prefix = '';
+        if($type === 'purchase') $prefix = 'P';
+        else if($type === 'product') $prefix = '#';
+
+        if($str && $prefix){
+            if(strpos(strtoupper($str), $prefix) === 0){
+                $str = substr($str, strlen($prefix));
+            }
+        }
+        return $str;
+    } // }}}
+}
+
+if(!function_exists('number_format_id')) {
+    function number_format_id($number){ // {{{
+        return number_format($number, 0, ',', '.');
+    } // }}}
+}
+
+if(!function_exists('unumber_format_id')) {
+    function unumber_format_id($str){ // {{{
+        return str_replace(',', '.', str_replace('.', '', $str));
+    } // }}}
+}
+
+if(!function_exists('money_format_id')) {
+    function money_format_id($number){ // {{{
+        return number_format($number, 0, ',', '.');
+    } // }}}
+}
+
+if(!function_exists('unmoney_format_id')) {
+    function unmoney_format_id($str){ // {{{
+        return str_replace(',', '.', str_replace('.', '', $str));
+    } // }}}
+}
+
+if(!function_exists('translate_status')) {
+    function translate_status($status, $field){ // {{{
+        $status_text = $status;
+        switch ($field) {
+            case 'po_status': //결재중(request), 주문확정(order), 배송중(delivery) - PL이 1개이상 배송중일 때, 입고완료(receive) - PL이 ALL 입고완료일 때, 취소(cancel) - PL이 ALL 취소일 때
+                switch ($status) {
+                    case 'deny':
+                        $status_text = lang('결재 반려');
+                        break;
+                    case 'request':
+                        $status_text = lang('결재중');
+                        break;
+                    case 'order':
+                        $status_text = lang('주문확정');
+                        break;
+                    case 'delivery':
+                        $status_text = lang('배송중');
+                        break;
+                    case 'receive':
+                        $status_text = lang('입고완료');
+                        break;
+                    case 'cancel':
+                        $status_text = lang('취소');
+                        break;
+                }
+                break;
+            case 'po_line_status': //결재중(request), 주문확정(order), 배송중(delivery), 입고완료(receive), 취소(cancel) - 구매사에서만 취소 가능
+                switch ($status) {
+                    case 'deny':
+                        $status_text = lang('결재 반려');
+                        break;
+                    case 'request':
+                        $status_text = lang('결재중');
+                        break;
+                    case 'order':
+                        $status_text = lang('주문확정');
+                        break;
+                    case 'delivery':
+                        $status_text = lang('배송중');
+                        break;
+                    case 'receive':
+                        $status_text = lang('입고완료');
+                        break;
+                    case 'cancel':
+                        $status_text = lang('취소');
+                        break;
+                }
+                break;
+            case 'po_deli_status': //배송중(delivery), 입고완료(receive)
+                switch ($status) {
+                    case 'delivery':
+                        $status_text = lang('배송중');
+                        break;
+                    case 'receive':
+                        $status_text = lang('입고완료');
+                        break;
+                }
+                break;
+            case 'appr_status': //request, approval, deny
+                switch ($status) {
+                    case 'request':
+                        $status_text = lang('결재중');
+                        break;
+                    case 'approval':
+                        $status_text = lang('결재 승인');
+                        break;
+                    case 'deny':
+                        $status_text = lang('결재 반려');
+                        break;
+                }
+                break;
+            case 'appr_det_status': //ready(결재순서가 아님), request(결재해 주세요), approval(결재완료), deny(반려)
+                switch ($status) {
+                    case 'ready':
+                        $status_text = lang('결재 전');
+                        break;
+                    case 'request':
+                        $status_text = lang('결재 대기중');
+                        break;
+                    case 'approval':
+                        $status_text = lang('결재 승인');
+                        break;
+                    case 'deny':
+                        $status_text = lang('결재 반려');
+                        break;
+                }
+                break;
+        }
+        return $status_text;
+    } // }}}
+}
+
+if(!function_exists('convert_hashtag')) {
+    function convert_hashtag($text='', $nl2br=true){ // {{{
+        $text = convert_text($text, $nl2br);
+        $regex = "/#([가-힝a-zA-Z0-9_]{2,}+)/";
+        $str = preg_replace($regex, '<a href="/search/hashtag/$1">$0</a>', $text);
+        return $str;
+    } // }}}
+}
+
+if(!function_exists('convert_text')) {
+    function convert_text($text='', $nl2br=true, $autolink=true){ // {{{
+        if($nl2br) {
+            $str = nl2br(strip_tags($text));
+        } else {
+            $str = strip_tags($text);
+        }
+        return ($autolink)?autolink($str):$str;
+    } // }}}
+}
+
+if(!function_exists('hashtag')) {
+    function hashtag($text='', $nl2br=true){ // {{{
+        $text = convert_text($text, $nl2br);
+        $regex = "/#([가-힝a-zA-Z0-9_]{2,}+)/";
+        $word = array();
+        preg_match_all($regex, $text, $word);
+        $str = null;
+        if(!empty($word[1])) {
+            $str = implode(" ", $word[1]); // a b c
+            //$str = implode(" ", $word[0]); // #a #b #c
+            //$str = preg_replace($regex, '<a href="hashtag#$1">$0</a>', $str);
+        }
+        return $str;
+    } // }}}
+}
+
+if(!function_exists('autolink')) {
+    function autolink($text) { // {{{
+        if(preg_match('%(?:youtube(?:-nocookie)?\.com/(?:[^/]+/.+/|(?:v|e(?:mbed)?)/|.*[?&]v=)|youtu\.be/)([^"&?/ ]{11})%i', $text, $match)) {
+            $text .= "<iframe width=\"100%\" height=\"100%\" src=\"https:\/\/www.youtube.com\/embed\/".$match[1]."\" frameborder=\"0\" allowfullscreen></iframe>";
+        }
+        // http  
+        $text = preg_replace("/http:\/\/([0-9a-z-.\/@~?&=_]+)/i", "<a href=\"http://\\1\" class=\"getmeta\" target='_blank'>http://\\1</a>", $text);
+        // https  
+        $text = preg_replace("/https:\/\/([0-9a-z-.\/@~?&=_]+)/i", "<a href=\"https://\\1\" class=\"getmeta\" target='_blank'>https://\\1</a>", $text);
+        // ftp  
+        //$text = preg_replace("/ftp:\/\/([0-9a-z-.\/@~?&=_]+)/i", "<a href=\"ftp://\\1\" target='_blank'>ftp://\\1</a>", $text);
+        // email 
+        //$text = preg_replace("/([_0-9a-z-]+(\.[_0-9a-z-]+)*)@([0-9a-z-]+(\.[0-9a-z-]+)*)/i", "<a href=\"mailto:\\1@\\3\">\\1@\\3</a>", $text);
+    return $text;
+    } // }}}
+}
+
+// 지금 부터 남은 시간
+if(!function_exists('remain_datetime')) {
+    function datetime_to_mktime($datetime) { // {{{
+        if(!empty($datetime)) {
+            $dt = explode(" ", $datetime);
+            $d = explode("-", $dt[0]);
+            $t = explode(":", $dt[1]);
+            $mktime = mktime($t[0], $t[1], $t[2], $d[1], $d[2], $d[0]);
+            return $mktime;
+        }
+    } // }}}
+}
+
+// 지금 부터 남은 시간
+if(!function_exists('remain_datetime')) {
+    function remain_datetime($datetime) { // {{{
+        if(!empty($datetime)) {
+            $dt = explode(" ", $datetime);
+            $d = explode("-", $dt[0]);
+            $t = explode(":", $dt[1]);
+            $end = mktime($t[0], $t[1], $t[2], $d[1], $d[2], $d[0]);
+            $remain_time = $end - time();
+            // 기간이 이미 지남
+            if($remain_time < 0) {
+                $remain = "종료";
+            // 기간이 남음 : 최대 7일
+            } else {
+                $rd = (int)($remain_time / (60 * 60 * 24)); // 남은 일
+                if($rd > 7) {
+                    $remain = "";
+                } else {
+                    $remain = $rd."일 남음";
+                    if($rd < 1) {
+                        $rh = (int)($remain_time / (60 * 60)); // 남은 시간
+                        $remain = $rh."시간 남음";
+                        if($rh < 1) {
+                            $rm = (int)($remain_time / (60)); // 남은 분
+                            $remain = $rm."분 남음";
+                            if($remain_time < 60) {
+                                $remain = $remain_time."초 남음"; // 남은 초
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return $remain;
+    } // }}}
+}
+
+// 댓글 작성일시 부터 지나온 시간
+if(!function_exists('after_datetime')) {
+    function after_datetime($datetime) { // {{{
+        if(!empty($datetime)) {
+            $dt = explode(" ", $datetime);
+            $d = explode("-", $dt[0]);
+            $t = explode(":", $dt[1]);
+            $end = mktime($t[0], $t[1], $t[2], $d[1], $d[2], $d[0]);
+            $after_time = time() - $end;
+            // 기간이 이미 지남
+            if($after_time < 0) {
+                $after = "Error";
+            // 기간이 남음 : 최대 7일
+            } else {
+                $ry = (int)($after_time / (60 * 60 * 24 * 365)); // 일
+                $after = $ry." year".(($ry > 1)?"s":"")." ago";
+                if($ry < 1) {
+                    $rd = (int)($after_time / (60 * 60 * 24)); // 일
+                    $after = $rd." day".(($rd > 1)?"s":"")." ago";
+                    if($rd < 1) {
+                        $rh = (int)($after_time / (60 * 60)); // 시간
+                        $after = $rh." hour".(($rh > 1)?"s":"")." ago";
+                        if($rh < 1) {
+                            $rm = (int)($after_time / (60)); // 분
+                            $after = $rm." min ago";
+                            if($after_time < 60) {
+                                $after = $after_time." sec ago"; // 초
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return $after;
+    } // }}}
+}
+
+// 아이피
+if(!function_exists('get_ip')) {
+    function get_ip() { // {{{
+        if(array_key_exists('HTTP_X_FORWARDED_FOR', $_SERVER)) {
+            $ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
+        } elseif(array_key_exists('REMOTE_ADDR', $_SERVER)) {
+            $ip = $_SERVER['REMOTE_ADDR'];
+        } elseif(array_key_exists('HTTP_CLIENT_IP', $_SERVER)) {
+            $ip = $_SERVER['HTTP_CLIENT_IP'];
+        }
+        return $ip;
+    } // }}}
+}
+
+// 포인트 별 레벨 정리 : level 1 ~ 증가하는 방식으로 각 숫자의 2제곱근에 도달하면 레벨업 > level 3은 3x3=9 점이 되어야 됨 > level 55는 55x55=3025 점이 되어야 됨
+if(!function_exists('get_level')) {
+    function get_level($point) { // {{{
+        $v = (int)(pow($point, 1/2));
+        return $v;
+    } // }}}
+}
